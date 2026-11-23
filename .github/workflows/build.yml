@@ -36,6 +36,22 @@ jobs:
       - name: Sync
         run: npx cap sync android
 
+      - name: Native splash image
+        run: |
+          find android/app/src/main/res -type f -name 'splash.png' -delete
+          mkdir -p android/app/src/main/res/drawable
+          cp native/splash.png android/app/src/main/res/drawable/splash.png
+
+      - name: Native splash + Google sign-in deep link
+        run: |
+          RES=android/app/src/main/res
+          JAVA=android/app/src/main/java/com/muraj3ti/murajaati
+          cp native/styles.xml $RES/values/styles.xml
+          cp native/splash_colors.xml $RES/values/splash_colors.xml
+          cp native/splash_icon_empty.xml $RES/drawable/splash_icon_empty.xml
+          cp native/MainActivity.java $JAVA/MainActivity.java
+          python3 native/patch_manifest.py android/app/src/main/AndroidManifest.xml
+
       - name: Set version code
         run: sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/" android/app/build.gradle
 
