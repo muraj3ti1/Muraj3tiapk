@@ -2,11 +2,6 @@ name: Build APK
 
 on:
   workflow_dispatch:
-    inputs:
-      allow_debug:
-        description: "للتجربة فقط: ابنِ بمفتاح تجريبي (لا يتحدث فوق النسخة المنشورة ولا يُنشر في Releases)"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -17,18 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check signing key
-        id: sign
+      - name: Guard - require release keystore
         env:
           KS: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KS" ]; then
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ inputs.allow_debug }}" = "true" ]; then
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::بناء تجريبي: لن يتحدث فوق النسخة المثبّتة ولن يُنشر في Releases"
-          else
-            echo "::error::لا يوجد مفتاح توقيع (KEYSTORE_BASE64). نسخة بمفتاح مختلف لا تتحدث فوق القديمة وقد يخسر المستخدمون بياناتهم. أُوقف البناء."
+          if [ -z "$KS" ]; then
+            echo "::error::KEYSTORE_BASE64 secret is missing. A debug-signed APK cannot update the installed app and users would lose their data. Build stopped."
             exit 1
           fi
 
@@ -100,13 +89,20 @@ jobs:
             cp android/app/build/outputs/apk/debug/app-debug.apk out/murajaati.apk
           fi
 
+      - name: Verify APK (package, signature, microphone permission)
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/aapt dump badging out/murajaati.apk | grep -E "^package:"
+          $BT/aapt dump badging out/murajaati.apk | grep -q "package: name='com.muraj3ti.murajaati'"
+          $BT/apksigner verify --print-certs out/murajaati.apk | grep -i "SHA-256"
+          $BT/aapt dump permissions out/murajaati.apk | grep "RECORD_AUDIO"
+
       - uses: actions/upload-artifact@v4
         with:
           name: murajaati-apk
           path: out/murajaati.apk
 
       - uses: softprops/action-gh-release@v2
-        if: steps.sign.outputs.signed == 'true'
         with:
           tag_name: v${{ github.run_number }}
           name: مراجعتي v${{ github.run_number }}
