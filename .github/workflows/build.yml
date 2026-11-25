@@ -12,12 +12,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Guard - require release keystore
+      - name: Guard - signing secrets
         env:
           KS: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -z "$KS" ]; then
-            echo "::error::KEYSTORE_BASE64 secret is missing. A debug-signed APK cannot update the installed app and users would lose their data. Build stopped."
+          if [ -z "$KS" ] || [ -z "$KS_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
+            echo "::error::Signing secrets missing. Refusing to build with a debug key (users could not update over it)."
             exit 1
           fi
 
@@ -66,11 +69,9 @@ jobs:
 
       - name: Build
         working-directory: android
-        env:
-          KS: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           chmod +x gradlew
-          if [ -n "$KS" ]; then ./gradlew assembleRelease; else ./gradlew assembleDebug; fi
+          ./gradlew assembleRelease
 
       - name: Sign
         env:
@@ -80,22 +81,19 @@ jobs:
           KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
           mkdir -p out
-          if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > release.jks
-            BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-            $BT/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-            $BT/apksigner sign --ks release.jks --ks-pass env:KS_PASS --key-pass env:KEY_PASS --ks-key-alias "$KEY_ALIAS" --out out/murajaati.apk aligned.apk
-          else
-            cp android/app/build/outputs/apk/debug/app-debug.apk out/murajaati.apk
-          fi
+          echo "$KS" | base64 -d > release.jks
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          $BT/apksigner sign --ks release.jks --ks-pass env:KS_PASS --key-pass env:KEY_PASS --ks-key-alias "$KEY_ALIAS" --out out/murajaati.apk aligned.apk
+          rm -f release.jks
 
-      - name: Verify APK (package, signature, microphone permission)
+      - name: Verify APK
         run: |
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          $BT/aapt dump badging out/murajaati.apk | grep -E "^package:"
-          $BT/aapt dump badging out/murajaati.apk | grep -q "package: name='com.muraj3ti.murajaati'"
-          $BT/apksigner verify --print-certs out/murajaati.apk | grep -i "SHA-256"
-          $BT/aapt dump permissions out/murajaati.apk | grep "RECORD_AUDIO"
+          $BT/aapt dump badging out/murajaati.apk | grep -E "package: name"
+          $BT/aapt dump badging out/murajaati.apk | grep "package: name='com.muraj3ti.murajaati'"
+          $BT/aapt dump permissions out/murajaati.apk | grep RECORD_AUDIO
+          $BT/apksigner verify --print-certs out/murajaati.apk | grep "SHA-256"
 
       - uses: actions/upload-artifact@v4
         with:
